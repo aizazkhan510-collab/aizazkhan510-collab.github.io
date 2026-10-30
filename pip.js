@@ -250,8 +250,24 @@
     return out;
   }
 
-  // Draws one frame of a scene at local time lt (seconds into the scene).
-  function drawScene(ctx, W, H, scene, lt, t, dur, talking) {
+  function drawSubtitle(ctx, W, H, text) {
+    ctx.save();
+    ctx.font = '700 ' + Math.round(H * 0.045) + 'px "Arial Rounded MT Bold", "Nunito", system-ui, sans-serif';
+    var lines = [], line = '';
+    text.split(/\s+/).forEach(function (w) {
+      var test = line ? line + ' ' + w : w;
+      if (ctx.measureText(test).width > W * 0.78 && line) { lines.push(line); line = w; } else line = test;
+    });
+    lines.push(line);
+    var lh = H * 0.06, h = lines.length * lh + H * 0.03, y0 = H - h - H * 0.03;
+    ctx.fillStyle = 'rgba(0,0,0,.55)'; rr(ctx, W * 0.08, y0, W * 0.84, h, 18); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    lines.forEach(function (l, i) { ctx.fillText(l, W / 2, y0 + H * 0.015 + lh * (i + 0.5)); });
+    ctx.restore();
+  }
+
+  // Draws one frame of a scene at local time lt (seconds into the scene); subtitle is shown when there is no voice.
+  function drawScene(ctx, W, H, scene, lt, t, dur, talking, subtitle) {
     drawBg(ctx, W, H, scene.background, t);
     var items = flatItems(scene), n = items.length;
     var step = n ? Math.min(0.9, Math.max(0.25, (dur - 1.6) / n)) : 0;
@@ -284,6 +300,7 @@
         ctx.restore();
       }
     }
+    if (subtitle && lt > 0.4) drawSubtitle(ctx, W, H, subtitle);
     if (lt < 0.35) { ctx.fillStyle = 'rgba(255,255,255,' + (1 - lt / 0.35) + ')'; ctx.fillRect(0, 0, W, H); }
   }
 
@@ -294,11 +311,15 @@
     o.connect(g).connect(out); o.start(when); o.stop(when + 0.55);
   }
 
+  // Without a voice, give each line roughly the time a parent needs to read it aloud.
+  function readSeconds(text) { return Math.max(2.5, String(text).split(/\s+/).length / 2.2); }
+
   function sceneTimes(story, bufs) {
     var starts = [], durs = [], t = 0;
     story.scenes.forEach(function (sc, i) {
       var n = flatItems(sc).length;
-      var d = Math.max(3, (bufs[i] ? bufs[i].duration : 2) + 1.2, n ? 0.4 + n * 0.75 + 1.2 : 0);
+      var spoken = bufs[i] ? bufs[i].duration : readSeconds(sc.narration);
+      var d = Math.max(3, spoken + 1.2, n ? 0.4 + n * 0.75 + 1.2 : 0);
       starts.push(t); durs.push(d); t += d;
     });
     return { starts: starts, durs: durs, total: t };
@@ -338,14 +359,14 @@
         var i = 0; while (i < tm.starts.length - 1 && tm.starts[i + 1] <= t) i++;
         var lt = t - tm.starts[i];
         var talking = !!bufs[i] && lt > 0.4 && lt < 0.4 + bufs[i].duration;
-        drawScene(ctx, W, H, story.scenes[i], lt, t, tm.durs[i], talking);
+        drawScene(ctx, W, H, story.scenes[i], lt, t, tm.durs[i], talking, bufs[i] ? '' : story.scenes[i].narration);
         if (onProgress) onProgress(Math.round(t / total * 100));
       }, 1000 / 30);
     });
     ac.close();
     var cues = story.scenes.map(function (sc, i) {
       var st = tm.starts[i] + 0.4;
-      return { start: st, end: st + (bufs[i] ? bufs[i].duration : 2.5), text: sc.narration };
+      return { start: st, end: st + (bufs[i] ? bufs[i].duration : readSeconds(sc.narration)), text: sc.narration };
     });
     var name = (story.title || 'Little Pip').replace(/[^\w\- ]+/g, '').trim() || 'Little Pip';
     return { file: new File([new Blob(chunks, { type: 'video/webm' })], name + '.webm', { type: 'video/webm' }), cues: cues, seconds: total };
@@ -444,7 +465,7 @@
       + 'uploaded as <b>Private</b> and <b>Made for Kids</b>. Keep this tab open and on screen while it works.</p>'
       + '<div class="grid2">'
       + '<div><label for="kdClaude">Claude API key</label><input id="kdClaude" type="password" autocomplete="off" placeholder="sk-ant-…" style="width:100%;font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px"></div>'
-      + '<div><label for="kdTts">Google voice API key</label><input id="kdTts" type="password" autocomplete="off" placeholder="AIza…" style="width:100%;font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px"></div>'
+      + '<div><label for="kdTts">Google voice API key (optional — empty = music + on-screen text)</label><input id="kdTts" type="password" autocomplete="off" placeholder="AIza…" style="width:100%;font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px"></div>'
       + '<div><label for="kdVoice">Narrator voice</label><select id="kdVoice">'
       + '<option value="en-US-Neural2-F">Warm female (US)</option><option value="en-US-Neural2-H">Bright female (US)</option>'
       + '<option value="en-US-Neural2-D">Friendly male (US)</option><option value="en-GB-Neural2-A">Gentle female (UK)</option></select></div>'
@@ -497,7 +518,6 @@
   async function run() {
     var key = $('kdClaude').value.trim(), ttsKey = $('kdTts').value.trim(), voice = $('kdVoice').value;
     if (!key) return toast('Paste your Claude API key first', true);
-    if (!ttsKey) return toast('Paste your Google voice API key first', true);
     try {
       if ($('kdRemember').checked) { localStorage.setItem(KEY_STORE, key); localStorage.setItem(TTS_STORE, ttsKey); }
       else localStorage.removeItem(TTS_STORE);
@@ -529,6 +549,7 @@
         var story = cleanStory(await askClaude(key, KIDS_SYSTEM, STORY_SCHEMA, 'Episode topic: ' + topic));
         var mp3s = [];
         for (var k = 0; k < story.scenes.length; k++) {
+          if (!ttsKey) { mp3s.push(null); continue; }
           st.textContent = 'Recording Pip\'s voice… ' + (k + 1) + '/' + story.scenes.length;
           mp3s.push(await speak(story.scenes[k].narration, ttsKey, voice));
         }
