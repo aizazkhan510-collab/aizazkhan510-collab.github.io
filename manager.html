@@ -45,6 +45,11 @@
     .comment:first-child { border-top:0; margin-top:0; padding-top:0; }
     .reply { margin-left:20px; padding-left:10px; border-left:2px solid var(--line); margin-top:8px; }
     .pill { font-size:.78rem; padding:2px 8px; border-radius:99px; background:var(--line); margin-left:6px; }
+    .grid2 { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:0 14px; }
+    input[type=number] { width:100px; font:inherit; padding:8px 10px; border:1px solid var(--line); border-radius:8px; }
+    input[type=color] { width:64px; height:38px; padding:2px; border:1px solid var(--line); border-radius:8px; background:#fff; }
+    .slide-head { display:flex; justify-content:space-between; align-items:center; }
+    .slide-head b { font-size:1rem; }
     @media (max-width:600px) { .row { flex-direction:column; } .row img { width:100%; } }
   </style>
 </head>
@@ -69,6 +74,8 @@
     <nav>
       <button data-tab="overview" class="active">Overview</button>
       <button data-tab="videos">Videos</button>
+      <button data-tab="auto">Auto ✨</button>
+      <button data-tab="create">Create</button>
       <button data-tab="upload">Upload</button>
       <button data-tab="comments">Comments</button>
     </nav>
@@ -78,6 +85,76 @@
     <section id="tab-videos" class="hidden">
       <div id="videoList"></div>
       <div class="actions"><button id="moreVideos" class="secondary hidden">Load more</button></div>
+    </section>
+
+    <section id="tab-auto" class="hidden">
+      <div class="card">
+        <h3 style="margin-top:0">Auto manager</h3>
+        <p class="muted" style="margin:0">Type your topics, one per line. For each one, AI writes the script, title, description and tags,
+          the app creates the video and uploads it. Keep this tab open and on screen while it works.</p>
+        <label for="auKey">Claude API key</label>
+        <input id="auKey" type="password" placeholder="sk-ant-…" autocomplete="off"
+               style="width:100%;font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px">
+        <label style="font-weight:400"><input id="auRemember" type="checkbox"> Remember the key on this computer</label>
+        <label for="auTopics">Topics (one per line)</label>
+        <textarea id="auTopics" placeholder="5 tips to save money&#10;How to learn English faster&#10;3 healthy breakfast ideas"></textarea>
+        <div class="grid2">
+          <div><label for="auFormat">Format</label>
+            <select id="auFormat">
+              <option value="short">YouTube Short (9:16 vertical)</option>
+              <option value="landscape">Normal video (16:9 landscape)</option>
+            </select></div>
+          <div><label for="auLang">Language</label><input id="auLang" type="text" value="English"></div>
+          <div><label for="auLen">Length per video (seconds)</label><input id="auLen" type="number" min="15" max="180" value="45"></div>
+          <div><label for="auPrivacy">Visibility</label>
+            <select id="auPrivacy">
+              <option value="private">Private</option>
+              <option value="unlisted">Unlisted</option>
+              <option value="public">Public</option>
+            </select></div>
+          <div><label for="auStart">Schedule: first video goes live at (optional)</label><input id="auStart" type="datetime-local"></div>
+          <div><label for="auGap">Hours between videos</label><input id="auGap" type="number" min="1" max="720" value="24"></div>
+          <div><label for="auMusic">Background music (optional)</label><input id="auMusic" type="file" accept="audio/*"></div>
+        </div>
+        <label style="font-weight:400"><input id="auReview" type="checkbox" checked> Let me watch and approve each video before it's uploaded</label>
+        <div class="actions">
+          <button id="auRun">Start</button>
+          <button id="auStop" class="secondary">Stop after current video</button>
+        </div>
+      </div>
+      <div id="auLog"></div>
+    </section>
+
+    <section id="tab-create" class="hidden">
+      <div class="card">
+        <h3 style="margin-top:0">Make a video from text and pictures</h3>
+        <p class="muted" style="margin:0">Add slides below, then click <b>Create video</b>. Keep this tab open and visible while it records.</p>
+        <div class="grid2">
+          <div><label for="crFormat">Format</label>
+            <select id="crFormat">
+              <option value="landscape">Normal video (16:9 landscape)</option>
+              <option value="short">YouTube Short (9:16 vertical)</option>
+            </select></div>
+          <div><label for="crMusic">Background music (optional)</label><input id="crMusic" type="file" accept="audio/*"></div>
+          <div><label>Background colour</label><input id="crBg" type="color" value="#0f172a"></div>
+          <div><label>Text colour</label><input id="crFg" type="color" value="#ffffff"></div>
+        </div>
+      </div>
+      <div id="slides"></div>
+      <div class="actions">
+        <button class="secondary" id="addSlide">+ Add slide</button>
+        <button id="makeVideo">Create video</button>
+      </div>
+      <div id="crResult" class="card hidden" style="margin-top:14px">
+        <progress id="crProgress" max="100" value="0"></progress>
+        <div id="crStatus" class="muted"></div>
+        <video id="crVideo" class="hidden" controls playsinline
+               style="width:100%;max-height:480px;background:#000;border-radius:8px;margin-top:10px"></video>
+        <div id="crActions" class="actions hidden">
+          <button id="crToUpload">Send to Upload tab</button>
+          <a id="crDownload" download="video.webm"><button class="secondary">Download</button></a>
+        </div>
+      </div>
     </section>
 
     <section id="tab-upload" class="hidden">
@@ -180,7 +257,7 @@ async function start() {
 // ---- Tabs ----
 document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
   document.querySelectorAll('nav button').forEach(x => x.classList.toggle('active', x === b));
-  ['overview', 'videos', 'upload', 'comments'].forEach(t => $('tab-' + t).classList.toggle('hidden', t !== b.dataset.tab));
+  ['overview', 'videos', 'auto', 'create', 'upload', 'comments'].forEach(t => $('tab-' + t).classList.toggle('hidden', t !== b.dataset.tab));
 });
 
 // ---- Overview ----
@@ -275,6 +352,262 @@ async function saveVideo(id, btn) {
   } catch (e) { toast(e.message, true); btn.disabled = false; }
 }
 
+// ---- Create ----
+let slideCount = 0, createdFile = null;
+function addSlide(text = '') {
+  const n = ++slideCount;
+  $('slides').insertAdjacentHTML('beforeend', `<div class="card slide" id="s-${n}">
+    <div class="slide-head"><b>Slide</b><button class="secondary" onclick="$('s-${n}').remove()">Remove</button></div>
+    <label>Text</label><textarea class="s-text" style="min-height:70px" placeholder="What should this slide say?">${esc(text)}</textarea>
+    <div class="grid2">
+      <div><label>Picture (optional)</label><input class="s-img" type="file" accept="image/*"></div>
+      <div><label>Seconds on screen</label><input class="s-dur" type="number" min="1" max="60" value="4"></div>
+    </div></div>`);
+}
+$('addSlide').onclick = () => addSlide();
+addSlide('Welcome to my channel!'); addSlide('Like and subscribe for more');
+
+function wrapText(ctx, text, maxW) {
+  const lines = [];
+  text.split('\n').forEach(para => {
+    let line = '';
+    para.split(' ').forEach(word => {
+      const test = line ? line + ' ' + word : word;
+      if (ctx.measureText(test).width > maxW && line) { lines.push(line); line = word; } else line = test;
+    });
+    lines.push(line);
+  });
+  return lines;
+}
+
+function drawSlide(ctx, W, H, s, alpha, bg, fg) {
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+  if (s.img) {
+    const r = Math.max(W / s.img.width, H / s.img.height);
+    const w = s.img.width * r, h = s.img.height * r;
+    ctx.drawImage(s.img, (W - w) / 2, (H - h) / 2, w, h);
+    if (s.text) { ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(0, 0, W, H); }
+  }
+  if (s.text) {
+    const size = Math.round(Math.min(W, H) * 0.075);
+    ctx.font = `700 ${size}px system-ui, "Segoe UI", Roboto, sans-serif`;
+    ctx.fillStyle = fg; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const lines = wrapText(ctx, s.text, W * 0.84), lh = size * 1.3;
+    lines.forEach((l, i) => ctx.fillText(l, W / 2, H / 2 + (i - (lines.length - 1) / 2) * lh));
+  }
+  ctx.globalAlpha = 1;
+}
+
+// Records slides to a WebM file in real time; onProgress gets 0-100.
+async function renderVideo({ slides, short, bg, fg, music, name, onProgress }) {
+  const W = short ? 720 : 1280, H = short ? 1280 : 720;
+  const total = slides.reduce((a, s) => a + s.dur, 0);
+  const canvas = document.createElement('canvas'); canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  const stream = canvas.captureStream(30);
+  let ac = null, gain = null, src = null;
+  if (music) {
+    ac = new AudioContext();
+    const buf = await ac.decodeAudioData(await music.arrayBuffer());
+    src = ac.createBufferSource(); src.buffer = buf; src.loop = true;
+    gain = ac.createGain(); const dest = ac.createMediaStreamDestination();
+    src.connect(gain).connect(dest);
+    stream.addTrack(dest.stream.getAudioTracks()[0]);
+  }
+  const mimeType = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm']
+    .find(m => MediaRecorder.isTypeSupported(m));
+  const rec = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 5_000_000 });
+  const chunks = [];
+  rec.ondataavailable = e => e.data.size && chunks.push(e.data);
+
+  const starts = []; slides.reduce((t, s) => (starts.push(t), t + s.dur), 0);
+  const frame = t => {
+    let i = starts.findLastIndex(st => st <= t); if (i < 0) i = 0;
+    drawSlide(ctx, W, H, slides[i], 1, bg, fg);
+    const left = starts[i] + slides[i].dur - t;
+    if (left < 0.5 && slides[i + 1]) drawSlide(ctx, W, H, slides[i + 1], 1 - left / 0.5, bg, fg);
+  };
+  frame(0);
+  rec.start(1000); src?.start();
+  const t0 = performance.now();
+  if (gain) { gain.gain.setValueAtTime(1, ac.currentTime + Math.max(0, total - 1.5)); gain.gain.linearRampToValueAtTime(0, ac.currentTime + total); }
+  await new Promise(resolve => {
+    const timer = setInterval(() => {
+      const t = (performance.now() - t0) / 1000;
+      if (t >= total) { clearInterval(timer); frame(total - 0.001); rec.onstop = resolve; rec.stop(); return; }
+      frame(t);
+      onProgress?.(Math.round(t / total * 100));
+    }, 1000 / 30);
+  });
+  src?.stop(); ac?.close();
+  const blob = new Blob(chunks, { type: 'video/webm' });
+  const file = new File([blob], (name.replace(/[^\w\- ]+/g, '').trim() || 'video') + '.webm', { type: 'video/webm' });
+  file.title = name;
+  return file;
+}
+
+async function readSlides() {
+  const slides = [];
+  for (const el of document.querySelectorAll('.slide')) {
+    const file = el.querySelector('.s-img').files[0];
+    slides.push({ text: el.querySelector('.s-text').value.trim(),
+      img: file ? await createImageBitmap(file) : null,
+      dur: Math.min(60, Math.max(1, Number(el.querySelector('.s-dur').value) || 4)) });
+  }
+  return slides;
+}
+
+$('makeVideo').onclick = async () => {
+  const slides = await readSlides();
+  if (!slides.some(s => s.text || s.img)) return toast('Add at least one slide with text or a picture', true);
+  const short = $('crFormat').value === 'short';
+  const total = slides.reduce((a, s) => a + s.dur, 0);
+  if (short && total > 180) return toast('Shorts must be 3 minutes or less', true);
+
+  $('makeVideo').disabled = true; $('crResult').classList.remove('hidden');
+  $('crVideo').classList.add('hidden'); $('crActions').classList.add('hidden');
+  $('crStatus').textContent = 'Recording… keep this tab open.';
+  try {
+    createdFile = await renderVideo({ slides, short, bg: $('crBg').value, fg: $('crFg').value, music: $('crMusic').files[0],
+      name: (slides.find(s => s.text)?.text.split('\n')[0] || 'My video').slice(0, 80),
+      onProgress: pct => { $('crProgress').value = pct; $('crStatus').textContent = `Recording… ${pct}% (keep this tab open)`; } });
+    const url = URL.createObjectURL(createdFile);
+    $('crVideo').src = url; $('crVideo').classList.remove('hidden');
+    $('crDownload').href = url; $('crDownload').download = createdFile.name;
+    $('crActions').classList.remove('hidden');
+    $('crProgress').value = 100;
+    $('crStatus').textContent = `Done! ${total} seconds, ${(createdFile.size / 1048576).toFixed(1)} MB. Watch it below.`;
+  } catch (e) { $('crStatus').textContent = 'Error: ' + e.message; toast(e.message, true); }
+  $('makeVideo').disabled = false;
+};
+
+$('crToUpload').onclick = () => {
+  if (!createdFile) return;
+  const dt = new DataTransfer(); dt.items.add(createdFile);
+  $('upFile').files = dt.files;
+  const short = $('crFormat').value === 'short';
+  $('upTitle').value = createdFile.title + (short && !/#shorts/i.test(createdFile.title) ? ' #Shorts' : '');
+  document.querySelector('nav button[data-tab="upload"]').click();
+  toast('Video added — check the details, then click Upload');
+};
+
+// ---- Auto ----
+const KEY_STORE = 'ytAgentClaudeKey';
+try { const k = localStorage.getItem(KEY_STORE); if (k) { $('auKey').value = k; $('auRemember').checked = true; } } catch {}
+
+const SCRIPT_SCHEMA = {
+  type: 'object', additionalProperties: false, required: ['title', 'description', 'tags', 'slides'],
+  properties: {
+    title: { type: 'string' },
+    description: { type: 'string' },
+    tags: { type: 'array', items: { type: 'string' } },
+    slides: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['text', 'seconds'],
+      properties: { text: { type: 'string' }, seconds: { type: 'integer' } } } }
+  }
+};
+const SCRIPT_SYSTEM = `You write scripts for faceless YouTube videos made only of on-screen text slides over a plain coloured background — no voice, no footage — so the text alone has to carry the video.
+Each slide holds one short line (at most about 12 words) and stays on screen long enough to read comfortably (roughly 1 second per 3 words, minimum 3 seconds).
+Open with a hook slide, deliver concrete, accurate, genuinely useful points, and end with a short call to like and subscribe.
+Title: under 70 characters, specific, and only promising what the video delivers.
+Description: 2–4 sentences followed by 3–5 relevant hashtags. Tags: 5–12 search terms.
+Write everything in the language the user asks for.`;
+
+async function writeScript(topic, { short, lang, seconds, key }) {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2026-10-21',
+      'anthropic-dangerous-direct-browser-access': 'true', 'anthropic-beta': 'server-side-fallback-2026-07-01' },
+    body: JSON.stringify({
+      model: 'claude-opus-5-5', max_tokens: 16000, fallbacks: 'default',
+      output_config: { effort: 'low', format: { type: 'json_schema', schema: SCRIPT_SCHEMA } },
+      system: SCRIPT_SYSTEM,
+      messages: [{ role: 'user', content:
+        `Topic: ${topic}\nFormat: ${short ? 'vertical YouTube Short' : 'normal landscape video'}\nLanguage: ${lang}\nTotal length: about ${seconds} seconds` }]
+    })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error('AI: ' + (data.error?.message || res.statusText));
+  if (data.stop_reason === 'refusal') throw new Error('AI declined to write about this topic');
+  if (data.stop_reason === 'max_tokens') throw new Error('AI reply was cut off — try a shorter length');
+  const text = data.content?.find(b => b.type === 'text')?.text;
+  if (!text) throw new Error('AI returned no script');
+  return JSON.parse(text);
+}
+
+const PALETTES = [['#0f172a', '#ffffff'], ['#7c2d12', '#fff7ed'], ['#14532d', '#f0fdf4'],
+  ['#1e3a8a', '#eff6ff'], ['#581c87', '#faf5ff'], ['#fef3c7', '#1c1917']];
+
+function reviewVideo(box, file, script) {
+  return new Promise(resolve => {
+    box.innerHTML = `<video controls playsinline src="${URL.createObjectURL(file)}"
+        style="width:100%;max-height:420px;background:#000;border-radius:8px;margin-top:10px"></video>
+      <label>Title</label><input type="text" class="rv-t" maxlength="100" value="${esc(script.title)}">
+      <label>Description</label><textarea class="rv-d">${esc(script.description)}</textarea>
+      <div class="actions"><button class="rv-ok">Approve &amp; upload</button><button class="secondary rv-skip">Skip</button></div>`;
+    box.querySelector('.rv-ok').onclick = () => {
+      const r = { ok: true, title: box.querySelector('.rv-t').value.trim(), description: box.querySelector('.rv-d').value };
+      box.innerHTML = ''; resolve(r);
+    };
+    box.querySelector('.rv-skip').onclick = () => { box.innerHTML = ''; resolve({ ok: false }); };
+  });
+}
+
+let auStopping = false;
+$('auStop').onclick = () => { auStopping = true; toast('Will stop after the current video'); };
+$('auRun').onclick = async () => {
+  const key = $('auKey').value.trim();
+  const topics = $('auTopics').value.split('\n').map(t => t.trim()).filter(Boolean);
+  if (!key) return toast('Paste your Claude API key first', true);
+  if (!topics.length) return toast('Type at least one topic', true);
+  try { $('auRemember').checked ? localStorage.setItem(KEY_STORE, key) : localStorage.removeItem(KEY_STORE); } catch {}
+
+  const short = $('auFormat').value === 'short';
+  const lang = $('auLang').value.trim() || 'English';
+  const seconds = Math.min(short ? 180 : 600, Math.max(15, Number($('auLen').value) || 45));
+  const start = $('auStart').value ? new Date($('auStart').value).getTime() : null;
+  const gapMs = Math.max(1, Number($('auGap').value) || 24) * 3600000;
+  const music = $('auMusic').files[0];
+  let slot = 0;
+  auStopping = false; $('auRun').disabled = true;
+
+  for (const [i, topic] of topics.entries()) {
+    if (auStopping) break;
+    $('auLog').insertAdjacentHTML('afterbegin', `<div class="card"><b>${esc(topic)}</b>
+      <div class="muted au-st"></div><div class="au-rv"></div></div>`);
+    const card = $('auLog').firstElementChild, st = card.querySelector('.au-st');
+    try {
+      st.textContent = 'Writing script…';
+      const script = await writeScript(topic, { short, lang, seconds, key });
+      const slides = script.slides.filter(s => s.text?.trim())
+        .map(s => ({ text: s.text.trim(), img: null, dur: Math.min(15, Math.max(2, s.seconds || 4)) }));
+      if (!slides.length) throw new Error('AI returned an empty script');
+      const [bg, fg] = PALETTES[i % PALETTES.length];
+      const file = await renderVideo({ slides, short, bg, fg, music, name: script.title,
+        onProgress: p => st.textContent = `Creating video… ${p}% (keep this tab on screen)` });
+
+      let { title, description } = script;
+      if ($('auReview').checked) {
+        st.textContent = 'Waiting for your approval';
+        const r = await reviewVideo(card.querySelector('.au-rv'), file, script);
+        if (!r.ok) { st.textContent = 'Skipped'; continue; }
+        ({ title, description } = r);
+      }
+      if (short && !/#shorts/i.test(title)) title = (title.slice(0, 91) + ' #Shorts');
+      const status = { privacyStatus: $('auPrivacy').value, selfDeclaredMadeForKids: false };
+      if (start) { status.privacyStatus = 'private'; status.publishAt = new Date(start + slot * gapMs).toISOString(); }
+      const meta = { snippet: { title: title.slice(0, 100), description, tags: script.tags.slice(0, 15), categoryId: '22' }, status };
+      const result = await uploadVideo(file, meta, p => st.textContent = `Uploading… ${p}%`);
+      slot++;
+      st.innerHTML = `✅ Uploaded — <a href="https://youtu.be/${result.id}" target="_blank" rel="noopener">open video</a>`
+        + (status.publishAt ? ` · goes live ${new Date(status.publishAt).toLocaleString()}` : '');
+    } catch (e) { st.textContent = '❌ ' + e.message; }
+  }
+  $('auRun').disabled = false;
+  toast(auStopping ? 'Stopped' : 'All topics finished');
+  loadVideos(true);
+};
+
 // ---- Upload ----
 $('upBtn').onclick = async () => {
   const file = $('upFile').files[0];
@@ -288,6 +621,18 @@ $('upBtn').onclick = async () => {
   $('upBtn').disabled = true; $('upProgressBox').classList.remove('hidden');
   $('upProgress').value = 0; $('upStatus').textContent = 'Starting upload…';
   try {
+    const result = await uploadVideo(file, meta, pct => {
+      $('upProgress').value = pct; $('upStatus').textContent = `Uploading… ${pct}%`;
+    });
+    $('upStatus').innerHTML = `Done! <a href="https://youtu.be/${result.id}" target="_blank" rel="noopener">Open video</a> — YouTube is now processing it.`;
+    ['upFile', 'upTitle', 'upDesc', 'upTags', 'upSchedule'].forEach(i => $(i).value = '');
+    toast('Upload complete'); loadVideos(true);
+  } catch (e) { $('upStatus').textContent = 'Error: ' + e.message; toast(e.message, true); }
+  $('upBtn').disabled = false;
+};
+
+// Resumable upload; meta is { snippet, status }. Resolves with the created video resource.
+async function uploadVideo(file, meta, onProgress) {
     const init = await fetch('https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status', {
       method: 'POST',
       headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json',
@@ -296,26 +641,17 @@ $('upBtn').onclick = async () => {
     });
     if (!init.ok) throw new Error((await init.json().catch(() => ({}))).error?.message || init.statusText);
     const uploadUrl = init.headers.get('Location');
-    const result = await new Promise((resolve, reject) => {
+    return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open('PUT', uploadUrl);
       xhr.setRequestHeader('Content-Type', file.type || 'video/*');
-      xhr.upload.onprogress = e => {
-        if (!e.lengthComputable) return;
-        const pct = Math.round(e.loaded / e.total * 100);
-        $('upProgress').value = pct; $('upStatus').textContent = `Uploading… ${pct}%`;
-      };
+      xhr.upload.onprogress = e => { if (e.lengthComputable) onProgress?.(Math.round(e.loaded / e.total * 100)); };
       xhr.onload = () => xhr.status < 300 ? resolve(JSON.parse(xhr.responseText))
         : reject(new Error(JSON.parse(xhr.responseText || '{}').error?.message || 'Upload failed'));
       xhr.onerror = () => reject(new Error('Network error during upload'));
       xhr.send(file);
     });
-    $('upStatus').innerHTML = `Done! <a href="https://youtu.be/${result.id}" target="_blank" rel="noopener">Open video</a> — YouTube is now processing it.`;
-    ['upFile', 'upTitle', 'upDesc', 'upTags', 'upSchedule'].forEach(i => $(i).value = '');
-    toast('Upload complete'); loadVideos(true);
-  } catch (e) { $('upStatus').textContent = 'Error: ' + e.message; toast(e.message, true); }
-  $('upBtn').disabled = false;
-};
+}
 
 // ---- Comments ----
 let threads = {};
