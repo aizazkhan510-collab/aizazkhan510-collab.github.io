@@ -116,6 +116,7 @@
           <div><label for="auGap">Hours between videos</label><input id="auGap" type="number" min="1" max="720" value="24"></div>
           <div><label for="auMusic">Background music (optional)</label><input id="auMusic" type="file" accept="audio/*"></div>
         </div>
+        <label style="font-weight:400"><input id="auAutoMusic" type="checkbox" checked> Add generated background music when no music file is chosen</label>
         <label style="font-weight:400"><input id="auReview" type="checkbox" checked> Let me watch and approve each video before it's uploaded</label>
         <div class="actions">
           <button id="auRun">Start</button>
@@ -139,6 +140,7 @@
           <div><label>Background colour</label><input id="crBg" type="color" value="#0f172a"></div>
           <div><label>Text colour</label><input id="crFg" type="color" value="#ffffff"></div>
         </div>
+        <label style="font-weight:400"><input id="crAutoMusic" type="checkbox" checked> Add generated background music when no music file is chosen</label>
       </div>
       <div id="slides"></div>
       <div class="actions">
@@ -399,20 +401,52 @@ function drawSlide(ctx, W, H, s, alpha, bg, fg) {
   ctx.globalAlpha = 1;
 }
 
+// Soft generated backing track (chords, bass, plucks) into `out`, starting now, for `total` seconds.
+const MOODS = [
+  [[57, 60, 64], [53, 57, 60], [48, 52, 55], [55, 59, 62]],
+  [[48, 52, 55], [55, 59, 62], [57, 60, 64], [53, 57, 60]],
+  [[50, 53, 57], [46, 50, 53], [53, 57, 60], [48, 52, 55]]
+];
+function playGeneratedMusic(ac, out, total, mood = 0) {
+  const prog = MOODS[mood % MOODS.length], beat = 2;
+  const f = m => 440 * 2 ** ((m - 69) / 12);
+  const master = ac.createGain(); master.gain.value = 0.32;
+  const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 2000;
+  master.connect(lp).connect(out);
+  const note = (type, freq, t, len, peak, attack) => {
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = type; o.frequency.value = freq;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(peak, t + attack);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + len);
+    o.connect(g).connect(master); o.start(t); o.stop(t + len + 0.05);
+  };
+  for (let t = 0, i = 0; t < total; t += beat, i++) {
+    const ch = prog[i % prog.length], t0 = ac.currentTime + 0.05 + t;
+    ch.forEach(m => note('triangle', f(m), t0, beat, 0.22, 0.4));
+    note('sine', f(ch[0] - 12), t0, beat * 0.9, 0.5, 0.02);
+    for (let k = 0; k < 4; k++) note('sine', f(ch[k % 3] + 12), t0 + k * beat / 4, 0.45, 0.18, 0.01);
+  }
+}
+
 // Records slides to a WebM file in real time; onProgress gets 0-100.
-async function renderVideo({ slides, short, bg, fg, music, name, onProgress }) {
+// Sound: the music file if given, otherwise generated music when autoMusic is set.
+async function renderVideo({ slides, short, bg, fg, music, autoMusic, mood, name, onProgress }) {
   const W = short ? 720 : 1280, H = short ? 1280 : 720;
   const total = slides.reduce((a, s) => a + s.dur, 0);
   const canvas = document.createElement('canvas'); canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext('2d');
   const stream = canvas.captureStream(30);
   let ac = null, gain = null, src = null;
-  if (music) {
-    ac = new AudioContext();
-    const buf = await ac.decodeAudioData(await music.arrayBuffer());
-    src = ac.createBufferSource(); src.buffer = buf; src.loop = true;
+  if (music || autoMusic) {
+    ac = new AudioContext(); await ac.resume();
     gain = ac.createGain(); const dest = ac.createMediaStreamDestination();
-    src.connect(gain).connect(dest);
+    gain.connect(dest);
+    if (music) {
+      const buf = await ac.decodeAudioData(await music.arrayBuffer());
+      src = ac.createBufferSource(); src.buffer = buf; src.loop = true;
+      src.connect(gain);
+    }
     stream.addTrack(dest.stream.getAudioTracks()[0]);
   }
   const mimeType = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm']
@@ -430,6 +464,7 @@ async function renderVideo({ slides, short, bg, fg, music, name, onProgress }) {
   };
   frame(0);
   rec.start(1000); src?.start();
+  if (ac && !music) playGeneratedMusic(ac, gain, total, mood);
   const t0 = performance.now();
   if (gain) { gain.gain.setValueAtTime(1, ac.currentTime + Math.max(0, total - 1.5)); gain.gain.linearRampToValueAtTime(0, ac.currentTime + total); }
   await new Promise(resolve => {
@@ -470,6 +505,7 @@ $('makeVideo').onclick = async () => {
   $('crStatus').textContent = 'Recording… keep this tab open.';
   try {
     createdFile = await renderVideo({ slides, short, bg: $('crBg').value, fg: $('crFg').value, music: $('crMusic').files[0],
+      autoMusic: $('crAutoMusic').checked, mood: Math.floor(Math.random() * MOODS.length),
       name: (slides.find(s => s.text)?.text.split('\n')[0] || 'My video').slice(0, 80),
       onProgress: pct => { $('crProgress').value = pct; $('crStatus').textContent = `Recording… ${pct}% (keep this tab open)`; } });
     const url = URL.createObjectURL(createdFile);
@@ -583,7 +619,7 @@ $('auRun').onclick = async () => {
         .map(s => ({ text: s.text.trim(), img: null, dur: Math.min(15, Math.max(2, s.seconds || 4)) }));
       if (!slides.length) throw new Error('AI returned an empty script');
       const [bg, fg] = PALETTES[i % PALETTES.length];
-      const file = await renderVideo({ slides, short, bg, fg, music, name: script.title,
+      const file = await renderVideo({ slides, short, bg, fg, music, autoMusic: $('auAutoMusic').checked, mood: i, name: script.title,
         onProgress: p => st.textContent = `Creating video… ${p}% (keep this tab on screen)` });
 
       let { title, description } = script;
