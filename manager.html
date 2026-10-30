@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>YouTube Agent</title>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <style>
+    :root { --bg:#f8fafc; --card:#fff; --fg:#0f172a; --muted:#64748b; --line:#e2e8f0;
+            --accent:#dc2626; --accent-fg:#fff; --ok:#16a34a; --err:#b91c1c; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--bg); color:var(--fg);
+           font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; line-height:1.5; }
+    header { display:flex; align-items:center; justify-content:space-between; gap:12px;
+             padding:14px 16px; background:var(--card); border-bottom:1px solid var(--line); flex-wrap:wrap; }
+    header h1 { font-size:1.15rem; margin:0; }
+    main { max-width:1000px; margin:0 auto; padding:20px 16px 60px; }
+    nav { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:18px; }
+    nav button { background:transparent; border:1px solid var(--line); color:var(--fg); }
+    nav button.active { background:var(--fg); color:#fff; border-color:var(--fg); }
+    button { font:inherit; padding:8px 14px; border-radius:8px; border:1px solid transparent;
+             background:var(--accent); color:var(--accent-fg); cursor:pointer; }
+    button.secondary { background:var(--card); color:var(--fg); border-color:var(--line); }
+    button:disabled { opacity:.5; cursor:default; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:14px; }
+    .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; }
+    .stat b { display:block; font-size:1.6rem; }
+    .stat span { color:var(--muted); font-size:.9rem; }
+    .row { display:flex; gap:14px; align-items:flex-start; }
+    .row img { width:160px; aspect-ratio:16/9; object-fit:cover; border-radius:8px; flex-shrink:0; background:#ddd; }
+    .row .info { flex:1; min-width:0; }
+    .row h3 { margin:0 0 4px; font-size:1rem; overflow-wrap:anywhere; }
+    .muted { color:var(--muted); font-size:.9rem; }
+    label { display:block; font-weight:600; margin:12px 0 4px; font-size:.92rem; }
+    input[type=text], input[type=datetime-local], textarea, select {
+      width:100%; font:inherit; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:#fff; }
+    textarea { min-height:110px; resize:vertical; }
+    .actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+    .hidden { display:none !important; }
+    #toast { position:fixed; left:50%; bottom:20px; transform:translateX(-50%); background:var(--fg); color:#fff;
+             padding:10px 16px; border-radius:8px; max-width:calc(100% - 32px); z-index:10; }
+    #toast.err { background:var(--err); }
+    progress { width:100%; height:14px; }
+    .comment { border-top:1px solid var(--line); padding-top:10px; margin-top:10px; }
+    .comment:first-child { border-top:0; margin-top:0; padding-top:0; }
+    .reply { margin-left:20px; padding-left:10px; border-left:2px solid var(--line); margin-top:8px; }
+    .pill { font-size:.78rem; padding:2px 8px; border-radius:99px; background:var(--line); margin-left:6px; }
+    @media (max-width:600px) { .row { flex-direction:column; } .row img { width:100%; } }
+  </style>
+</head>
+<body>
+<header>
+  <h1>▶ YouTube Agent</h1>
+  <div>
+    <span id="who" class="muted"></span>
+    <button id="signin">Sign in with Google</button>
+    <button id="signout" class="secondary hidden">Sign out</button>
+  </div>
+</header>
+
+<main>
+  <div id="welcome" class="card">
+    <h2 style="margin-top:0">Manage your YouTube channel</h2>
+    <p class="muted">Sign in with the Google account that owns your channel. Your data stays between your browser and
+      Google — nothing is stored on any server. See our <a href="privacy.html">Privacy Policy</a>.</p>
+  </div>
+
+  <div id="app" class="hidden">
+    <nav>
+      <button data-tab="overview" class="active">Overview</button>
+      <button data-tab="videos">Videos</button>
+      <button data-tab="upload">Upload</button>
+      <button data-tab="comments">Comments</button>
+    </nav>
+
+    <section id="tab-overview"></section>
+
+    <section id="tab-videos" class="hidden">
+      <div id="videoList"></div>
+      <div class="actions"><button id="moreVideos" class="secondary hidden">Load more</button></div>
+    </section>
+
+    <section id="tab-upload" class="hidden">
+      <div class="card">
+        <label for="upFile">Video file</label>
+        <input id="upFile" type="file" accept="video/*">
+        <label for="upTitle">Title</label>
+        <input id="upTitle" type="text" maxlength="100">
+        <label for="upDesc">Description</label>
+        <textarea id="upDesc" maxlength="5000"></textarea>
+        <label for="upTags">Tags (comma separated)</label>
+        <input id="upTags" type="text">
+        <label for="upPrivacy">Visibility</label>
+        <select id="upPrivacy">
+          <option value="private">Private</option>
+          <option value="unlisted">Unlisted</option>
+          <option value="public">Public</option>
+        </select>
+        <label for="upSchedule">Schedule publish (optional — video stays private until then)</label>
+        <input id="upSchedule" type="datetime-local">
+        <label><input id="upKids" type="checkbox"> Made for kids</label>
+        <div class="actions"><button id="upBtn">Upload</button></div>
+        <div id="upProgressBox" class="hidden" style="margin-top:12px">
+          <progress id="upProgress" max="100" value="0"></progress>
+          <div id="upStatus" class="muted"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="tab-comments" class="hidden">
+      <div id="commentList"></div>
+      <div class="actions"><button id="moreComments" class="secondary hidden">Load more</button></div>
+    </section>
+  </div>
+</main>
+
+<div id="toast" class="hidden"></div>
+
+<script>
+// Paste your Web application OAuth Client ID here.
+const CLIENT_ID = '1048964196387-9iff30ppgjc791jmi937eefoeic4plgs.apps.googleusercontent.com';
+const SCOPES = 'https://www.googleapis.com/auth/youtube.force-ssl';
+const API = 'https://www.googleapis.com/youtube/v3';
+
+let token = null, tokenClient = null, channel = null;
+let videoPage = null, commentPage = null;
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const num = n => Number(n || 0).toLocaleString();
+
+function toast(msg, isErr) {
+  const t = $('toast');
+  t.textContent = msg; t.className = isErr ? 'err' : '';
+  clearTimeout(toast.timer); toast.timer = setTimeout(() => t.className = 'hidden', isErr ? 7000 : 3500);
+}
+
+async function api(path, { method = 'GET', body, base = API } = {}) {
+  const res = await fetch(base + path, {
+    method,
+    headers: { Authorization: 'Bearer ' + token, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+    body: body ? JSON.stringify(body) : undefined
+  });
+  if (res.status === 204) return null;
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error?.message || res.statusText);
+  return data;
+}
+
+// ---- Auth ----
+function initAuth() {
+  if (CLIENT_ID.startsWith('PASTE')) { $('signin').disabled = true; toast('Client ID not set yet', true); return; }
+  tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: CLIENT_ID, scope: SCOPES,
+    callback: r => { if (r.error) return toast('Sign-in failed: ' + r.error, true); token = r.access_token; start(); }
+  });
+}
+window.addEventListener('load', () => {
+  const wait = setInterval(() => { if (window.google?.accounts?.oauth2) { clearInterval(wait); initAuth(); } }, 100);
+});
+$('signin').onclick = () => tokenClient?.requestAccessToken();
+$('signout').onclick = () => {
+  if (token) google.accounts.oauth2.revoke(token);
+  token = null; channel = null;
+  $('app').classList.add('hidden'); $('welcome').classList.remove('hidden');
+  $('signin').classList.remove('hidden'); $('signout').classList.add('hidden'); $('who').textContent = '';
+};
+
+async function start() {
+  try {
+    const r = await api('/channels?part=snippet,statistics,contentDetails&mine=true');
+    if (!r.items?.length) return toast('This Google account has no YouTube channel.', true);
+    channel = r.items[0];
+    $('who').textContent = channel.snippet.title + ' ';
+    $('welcome').classList.add('hidden'); $('app').classList.remove('hidden');
+    $('signin').classList.add('hidden'); $('signout').classList.remove('hidden');
+    renderOverview(); loadVideos(true); loadComments(true);
+  } catch (e) { toast(e.message, true); }
+}
+
+// ---- Tabs ----
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('nav button').forEach(x => x.classList.toggle('active', x === b));
+  ['overview', 'videos', 'upload', 'comments'].forEach(t => $('tab-' + t).classList.toggle('hidden', t !== b.dataset.tab));
+});
+
+// ---- Overview ----
+function renderOverview() {
+  const s = channel.statistics, sn = channel.snippet;
+  $('tab-overview').innerHTML = `
+    <div class="card row">
+      <img src="${esc(sn.thumbnails?.medium?.url)}" alt="" style="width:88px;aspect-ratio:1;border-radius:50%">
+      <div class="info"><h3>${esc(sn.title)}</h3>
+        <div class="muted">${esc(sn.customUrl || '')}</div>
+        <p class="muted" style="white-space:pre-line">${esc((sn.description || '').slice(0, 300))}</p></div>
+    </div>
+    <div class="stats">
+      <div class="card stat"><b>${s.hiddenSubscriberCount ? 'Hidden' : num(s.subscriberCount)}</b><span>Subscribers</span></div>
+      <div class="card stat"><b>${num(s.viewCount)}</b><span>Total views</span></div>
+      <div class="card stat"><b>${num(s.videoCount)}</b><span>Videos</span></div>
+    </div>`;
+}
+
+// ---- Videos ----
+let videos = {};
+async function loadVideos(reset) {
+  try {
+    if (reset) { $('videoList').innerHTML = ''; videoPage = null; videos = {}; }
+    const uploads = channel.contentDetails.relatedPlaylists.uploads;
+    const pl = await api(`/playlistItems?part=contentDetails&maxResults=20&playlistId=${uploads}` + (videoPage ? '&pageToken=' + videoPage : ''));
+    videoPage = pl.nextPageToken || null;
+    $('moreVideos').classList.toggle('hidden', !videoPage);
+    const ids = pl.items.map(i => i.contentDetails.videoId).join(',');
+    if (!ids) { if (reset) $('videoList').innerHTML = '<div class="card muted">No videos yet.</div>'; return; }
+    const v = await api('/videos?part=snippet,status,statistics&id=' + ids);
+    v.items.forEach(item => { videos[item.id] = item; $('videoList').insertAdjacentHTML('beforeend', videoCard(item)); });
+  } catch (e) { toast(e.message, true); }
+}
+$('moreVideos').onclick = () => loadVideos(false);
+
+function videoCard(v) {
+  const st = v.statistics || {};
+  return `<div class="card" id="v-${v.id}">
+    <div class="row">
+      <img src="${esc(v.snippet.thumbnails?.medium?.url)}" alt="">
+      <div class="info">
+        <h3>${esc(v.snippet.title)}<span class="pill">${esc(v.status.privacyStatus)}</span></h3>
+        <div class="muted">${new Date(v.snippet.publishedAt).toLocaleDateString()} · ${num(st.viewCount)} views ·
+          ${num(st.likeCount)} likes · ${num(st.commentCount)} comments</div>
+        <div class="actions">
+          <button class="secondary" onclick="editVideo('${v.id}')">Edit</button>
+          <a href="https://youtu.be/${v.id}" target="_blank" rel="noopener"><button class="secondary">Open</button></a>
+        </div>
+        <div id="edit-${v.id}"></div>
+      </div>
+    </div></div>`;
+}
+
+function editVideo(id) {
+  const v = videos[id], box = $('edit-' + id);
+  if (box.innerHTML) { box.innerHTML = ''; return; }
+  box.innerHTML = `
+    <label>Title</label><input type="text" id="t-${id}" maxlength="100" value="${esc(v.snippet.title)}">
+    <label>Description</label><textarea id="d-${id}" maxlength="5000">${esc(v.snippet.description)}</textarea>
+    <label>Tags (comma separated)</label><input type="text" id="g-${id}" value="${esc((v.snippet.tags || []).join(', '))}">
+    <label>Visibility</label>
+    <select id="p-${id}">${['private', 'unlisted', 'public'].map(p =>
+      `<option ${p === v.status.privacyStatus ? 'selected' : ''}>${p}</option>`).join('')}</select>
+    <label>New thumbnail (optional — needs a verified channel)</label><input type="file" id="th-${id}" accept="image/jpeg,image/png">
+    <div class="actions"><button onclick="saveVideo('${id}', this)">Save</button>
+      <button class="secondary" onclick="editVideo('${id}')">Cancel</button></div>`;
+}
+
+async function saveVideo(id, btn) {
+  const v = videos[id];
+  btn.disabled = true;
+  try {
+    const snippet = { title: $('t-' + id).value.trim(), description: $('d-' + id).value,
+      tags: $('g-' + id).value.split(',').map(s => s.trim()).filter(Boolean), categoryId: v.snippet.categoryId };
+    if (v.snippet.defaultLanguage) snippet.defaultLanguage = v.snippet.defaultLanguage;
+    if (v.snippet.defaultAudioLanguage) snippet.defaultAudioLanguage = v.snippet.defaultAudioLanguage;
+    const status = { privacyStatus: $('p-' + id).value, embeddable: v.status.embeddable,
+      publicStatsViewable: v.status.publicStatsViewable, selfDeclaredMadeForKids: v.status.madeForKids,
+      license: v.status.license };
+    if (v.status.publishAt && status.privacyStatus === 'private') status.publishAt = v.status.publishAt;
+    const updated = await api('/videos?part=snippet,status', { method: 'PUT', body: { id, snippet, status } });
+    const thumb = $('th-' + id).files[0];
+    if (thumb) {
+      const r = await fetch(`https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=${id}&uploadType=media`,
+        { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': thumb.type }, body: thumb });
+      if (!r.ok) toast('Saved, but thumbnail failed: ' + ((await r.json().catch(() => ({}))).error?.message || r.statusText), true);
+    }
+    videos[id] = { ...v, snippet: { ...v.snippet, ...updated.snippet }, status: { ...v.status, ...updated.status } };
+    $('v-' + id).outerHTML = videoCard(videos[id]);
+    toast('Video updated');
+  } catch (e) { toast(e.message, true); btn.disabled = false; }
+}
+
+// ---- Upload ----
+$('upBtn').onclick = async () => {
+  const file = $('upFile').files[0];
+  if (!file) return toast('Choose a video file first', true);
+  const title = $('upTitle').value.trim() || file.name.replace(/\.[^.]+$/, '');
+  const status = { privacyStatus: $('upPrivacy').value, selfDeclaredMadeForKids: $('upKids').checked };
+  if ($('upSchedule').value) { status.privacyStatus = 'private'; status.publishAt = new Date($('upSchedule').value).toISOString(); }
+  const meta = { snippet: { title, description: $('upDesc').value,
+    tags: $('upTags').value.split(',').map(s => s.trim()).filter(Boolean), categoryId: '22' }, status };
+
+  $('upBtn').disabled = true; $('upProgressBox').classList.remove('hidden');
+  $('upProgress').value = 0; $('upStatus').textContent = 'Starting upload…';
+  try {
+    const init = await fetch('https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json',
+        'X-Upload-Content-Type': file.type || 'video/*', 'X-Upload-Content-Length': file.size },
+      body: JSON.stringify(meta)
+    });
+    if (!init.ok) throw new Error((await init.json().catch(() => ({}))).error?.message || init.statusText);
+    const uploadUrl = init.headers.get('Location');
+    const result = await new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('PUT', uploadUrl);
+      xhr.setRequestHeader('Content-Type', file.type || 'video/*');
+      xhr.upload.onprogress = e => {
+        if (!e.lengthComputable) return;
+        const pct = Math.round(e.loaded / e.total * 100);
+        $('upProgress').value = pct; $('upStatus').textContent = `Uploading… ${pct}%`;
+      };
+      xhr.onload = () => xhr.status < 300 ? resolve(JSON.parse(xhr.responseText))
+        : reject(new Error(JSON.parse(xhr.responseText || '{}').error?.message || 'Upload failed'));
+      xhr.onerror = () => reject(new Error('Network error during upload'));
+      xhr.send(file);
+    });
+    $('upStatus').innerHTML = `Done! <a href="https://youtu.be/${result.id}" target="_blank" rel="noopener">Open video</a> — YouTube is now processing it.`;
+    ['upFile', 'upTitle', 'upDesc', 'upTags', 'upSchedule'].forEach(i => $(i).value = '');
+    toast('Upload complete'); loadVideos(true);
+  } catch (e) { $('upStatus').textContent = 'Error: ' + e.message; toast(e.message, true); }
+  $('upBtn').disabled = false;
+};
+
+// ---- Comments ----
+let threads = {};
+async function loadComments(reset) {
+  try {
+    if (reset) { $('commentList').innerHTML = ''; commentPage = null; threads = {}; }
+    const r = await api(`/commentThreads?part=snippet,replies&maxResults=20&order=time&allThreadsRelatedToChannelId=${channel.id}`
+      + (commentPage ? '&pageToken=' + commentPage : ''));
+    commentPage = r.nextPageToken || null;
+    $('moreComments').classList.toggle('hidden', !commentPage);
+    if (reset && !r.items.length) $('commentList').innerHTML = '<div class="card muted">No comments yet.</div>';
+    r.items.forEach(t => { threads[t.id] = t; $('commentList').insertAdjacentHTML('beforeend', threadCard(t)); });
+  } catch (e) { toast(e.message, true); }
+}
+$('moreComments').onclick = () => loadComments(false);
+
+function commentHtml(c) {
+  const s = c.snippet;
+  return `<div><b>${esc(s.authorDisplayName)}</b> <span class="muted">· ${new Date(s.publishedAt).toLocaleString()}
+    · 👍 ${num(s.likeCount)}</span><div style="white-space:pre-line;overflow-wrap:anywhere">${esc(s.textOriginal)}</div></div>`;
+}
+
+function threadCard(t) {
+  const top = t.snippet.topLevelComment;
+  const replies = (t.replies?.comments || []).slice().reverse().map(c => `<div class="reply">${commentHtml(c)}</div>`).join('');
+  return `<div class="card" id="c-${t.id}">
+    <div class="muted" style="margin-bottom:6px">On <a href="https://youtu.be/${esc(t.snippet.videoId)}" target="_blank" rel="noopener">video ${esc(t.snippet.videoId)}</a></div>
+    ${commentHtml(top)}
+    <div id="r-${t.id}">${replies}</div>
+    <div class="actions">
+      <button class="secondary" onclick="toggleReply('${t.id}')">Reply</button>
+      <button class="secondary" onclick="hideComment('${t.id}', this)">Hide from channel</button>
+    </div>
+    <div id="rb-${t.id}"></div></div>`;
+}
+
+function toggleReply(id) {
+  const box = $('rb-' + id);
+  if (box.innerHTML) { box.innerHTML = ''; return; }
+  box.innerHTML = `<textarea id="rt-${id}" style="min-height:70px;margin-top:8px" placeholder="Write a reply…"></textarea>
+    <div class="actions"><button onclick="sendReply('${id}', this)">Send reply</button></div>`;
+  $('rt-' + id).focus();
+}
+
+async function sendReply(id, btn) {
+  const text = $('rt-' + id).value.trim();
+  if (!text) return;
+  btn.disabled = true;
+  try {
+    const c = await api('/comments?part=snippet', { method: 'POST', body: { snippet: { parentId: id, textOriginal: text } } });
+    $('r-' + id).insertAdjacentHTML('beforeend', `<div class="reply">${commentHtml(c)}</div>`);
+    $('rb-' + id).innerHTML = ''; toast('Reply posted');
+  } catch (e) { toast(e.message, true); btn.disabled = false; }
+}
+
+async function hideComment(id, btn) {
+  if (!confirm('Hide this comment from your channel?')) return;
+  btn.disabled = true;
+  try {
+    await api(`/comments/setModerationStatus?id=${threads[id].snippet.topLevelComment.id}&moderationStatus=rejected`, { method: 'POST' });
+    $('c-' + id).remove(); toast('Comment hidden');
+  } catch (e) { toast(e.message, true); btn.disabled = false; }
+}
+</script>
+</body>
+</html>
