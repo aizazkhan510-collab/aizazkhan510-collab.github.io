@@ -96,8 +96,16 @@
         <input id="auKey" type="password" placeholder="sk-ant-…" autocomplete="off"
                style="width:100%;font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px">
         <label style="font-weight:400"><input id="auRemember" type="checkbox"> Remember the key on this computer</label>
-        <label for="auTopics">Topics (one per line)</label>
-        <textarea id="auTopics" placeholder="5 tips to save money&#10;How to learn English faster&#10;3 healthy breakfast ideas"></textarea>
+        <label>Topics</label>
+        <label style="font-weight:400"><input type="radio" name="auMode" value="ai" checked> Let AI choose the topics for me</label>
+        <label style="font-weight:400;margin-top:4px"><input type="radio" name="auMode" value="mine"> I'll type my own topics</label>
+        <div id="auAiBox" class="grid2">
+          <div><label for="auTheme">Channel theme (optional — leave empty and AI decides from your channel)</label>
+            <input id="auTheme" type="text" placeholder="e.g. health tips, money tips, fun facts"></div>
+          <div><label for="auCount">How many videos</label><input id="auCount" type="number" min="1" max="20" value="3"></div>
+        </div>
+        <label for="auTopics" id="auTopicsLabel" class="hidden">Your topics (one per line)</label>
+        <textarea id="auTopics" class="hidden" placeholder="5 tips to save money&#10;How to learn English faster&#10;3 healthy breakfast ideas"></textarea>
         <div class="grid2">
           <div><label for="auFormat">Format</label>
             <select id="auFormat">
@@ -549,22 +557,45 @@ Title: under 70 characters, specific, and only promising what the video delivers
 Description: 2–4 sentences followed by 3–5 relevant hashtags. Tags: 5–12 search terms.
 Write everything in the language the user asks for.`;
 
-async function writeScript(topic, { short, lang, seconds, key }) {
+const TOPICS_SCHEMA = {
+  type: 'object', additionalProperties: false, required: ['topics'],
+  properties: { topics: { type: 'array', items: { type: 'string' } } }
+};
+const TOPICS_SYSTEM = `You plan videos for a faceless YouTube channel whose videos are short on-screen text slides with background music.
+Suggest topics that are specific, genuinely useful or interesting, suitable for all audiences, and easy to explain in a few short lines of text.
+Every topic must differ from the others and from the channel's recent videos. Return each topic as a short phrase in the requested language.`;
+
+async function pickTopics(key, { count, theme, lang, short }) {
+  const sn = channel.snippet;
+  const recent = Object.values(videos).map(v => v.snippet.title).slice(0, 30);
+  const r = await askClaude(key, TOPICS_SYSTEM, TOPICS_SCHEMA,
+    `Channel name: ${sn.title}\nChannel description: ${sn.description || '(none)'}\n`
+    + `Theme: ${theme || '(none given: pick one that fits the channel, or a broadly useful everyday-tips theme if unclear)'}\n`
+    + `Recent video titles (do not repeat): ${recent.join(' | ') || '(none)'}\n`
+    + `Format: ${short ? 'vertical YouTube Short' : 'normal landscape video'}\nLanguage: ${lang}\nNumber of topics: ${count}`);
+  return r.topics.map(t => t.trim()).filter(Boolean).slice(0, count);
+}
+
+function writeScript(topic, { short, lang, seconds, key }) {
+  return askClaude(key, SCRIPT_SYSTEM, SCRIPT_SCHEMA,
+    `Topic: ${topic}\nFormat: ${short ? 'vertical YouTube Short' : 'normal landscape video'}\nLanguage: ${lang}\nTotal length: about ${seconds} seconds`);
+}
+
+// One structured-output request to Claude straight from the browser with the user's own key.
+async function askClaude(key, system, schema, content) {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2026-10-21',
       'anthropic-dangerous-direct-browser-access': 'true', 'anthropic-beta': 'server-side-fallback-2026-07-01' },
     body: JSON.stringify({
       model: 'claude-opus-5-5', max_tokens: 16000, fallbacks: 'default',
-      output_config: { effort: 'low', format: { type: 'json_schema', schema: SCRIPT_SCHEMA } },
-      system: SCRIPT_SYSTEM,
-      messages: [{ role: 'user', content:
-        `Topic: ${topic}\nFormat: ${short ? 'vertical YouTube Short' : 'normal landscape video'}\nLanguage: ${lang}\nTotal length: about ${seconds} seconds` }]
+      output_config: { effort: 'low', format: { type: 'json_schema', schema } },
+      system, messages: [{ role: 'user', content }]
     })
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error('AI: ' + (data.error?.message || res.statusText));
-  if (data.stop_reason === 'refusal') throw new Error('AI declined to write about this topic');
+  if (data.stop_reason === 'refusal') throw new Error('AI declined this request');
   if (data.stop_reason === 'max_tokens') throw new Error('AI reply was cut off — try a shorter length');
   const text = data.content?.find(b => b.type === 'text')?.text;
   if (!text) throw new Error('AI returned no script');
@@ -589,13 +620,20 @@ function reviewVideo(box, file, script) {
   });
 }
 
+document.querySelectorAll('input[name=auMode]').forEach(r => r.onchange = () => {
+  const mine = document.querySelector('input[name=auMode]:checked').value === 'mine';
+  $('auAiBox').classList.toggle('hidden', mine);
+  $('auTopics').classList.toggle('hidden', !mine); $('auTopicsLabel').classList.toggle('hidden', !mine);
+});
+
 let auStopping = false;
 $('auStop').onclick = () => { auStopping = true; toast('Will stop after the current video'); };
 $('auRun').onclick = async () => {
   const key = $('auKey').value.trim();
-  const topics = $('auTopics').value.split('\n').map(t => t.trim()).filter(Boolean);
+  const aiTopics = document.querySelector('input[name=auMode]:checked').value === 'ai';
+  let topics = $('auTopics').value.split('\n').map(t => t.trim()).filter(Boolean);
   if (!key) return toast('Paste your Claude API key first', true);
-  if (!topics.length) return toast('Type at least one topic', true);
+  if (!aiTopics && !topics.length) return toast('Type at least one topic', true);
   try { $('auRemember').checked ? localStorage.setItem(KEY_STORE, key) : localStorage.removeItem(KEY_STORE); } catch {}
 
   const short = $('auFormat').value === 'short';
@@ -606,6 +644,17 @@ $('auRun').onclick = async () => {
   const music = $('auMusic').files[0];
   let slot = 0;
   auStopping = false; $('auRun').disabled = true;
+
+  if (aiTopics) {
+    $('auLog').insertAdjacentHTML('afterbegin', '<div class="card muted">Choosing topics…</div>');
+    const note = $('auLog').firstElementChild;
+    try {
+      topics = await pickTopics(key, { count: Math.min(20, Math.max(1, Number($('auCount').value) || 3)),
+        theme: $('auTheme').value.trim(), lang, short });
+      if (!topics.length) throw new Error('AI returned no topics');
+      note.textContent = 'AI chose: ' + topics.join(' · ');
+    } catch (e) { note.textContent = '❌ ' + e.message; $('auRun').disabled = false; return; }
+  }
 
   for (const [i, topic] of topics.entries()) {
     if (auStopping) break;
