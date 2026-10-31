@@ -536,6 +536,8 @@
       + '<label style="font-weight:400"><input id="kdRemember" type="checkbox"> Remember both keys on this computer</label>'
       + '<label for="kdTopics">Episodes to make (one per line — leave empty and AI chooses)</label>'
       + '<textarea id="kdTopics"></textarea>'
+      + '<label for="kdScript">Ready-made episode script (optional — paste the script Claude wrote for you; then no Claude API key is needed)</label>'
+      + '<textarea id="kdScript" placeholder="{ &quot;title&quot;: ... }" style="font-family:monospace;font-size:.85rem"></textarea>'
       + '<label style="font-weight:400"><input id="kdReview" type="checkbox" checked> Let me watch and approve each episode before it\'s uploaded</label>'
       + '<div class="actions"><button id="kdRun">Start</button><button id="kdStop" class="secondary">Stop after current episode</button></div></div>'
       + '<div id="kdLog"></div>';
@@ -589,7 +591,12 @@
     var elKey = $('kdElKey').value.trim(), elVoice = $('kdElVoice').value;
     var freeVoice = $('kdFreeVoice').value, pitch = Number($('kdPitch').value) || 1;
     try { localStorage.setItem(FREE_VOICE_STORE, freeVoice); localStorage.setItem(PITCH_STORE, String(pitch)); } catch (e) {}
-    if (!key) return toast('Paste your Claude API key first', true);
+    var ready = null;
+    if ($('kdScript').value.trim()) {
+      try { ready = cleanStory(JSON.parse($('kdScript').value)); }
+      catch (e) { return toast('The episode script is not valid: ' + e.message, true); }
+    }
+    if (!key && !ready) return toast('Paste your Claude API key, or a ready-made episode script', true);
     if (elKey && !elVoice) return toast('Click "Load my voices" and pick Pip\'s voice', true);
     try {
       if ($('kdRemember').checked) {
@@ -598,6 +605,7 @@
       } else [TTS_STORE, EL_STORE, EL_VOICE_STORE].forEach(function (k) { localStorage.removeItem(k); });
     } catch (e) {}
     var topics = $('kdTopics').value.split('\n').map(function (t) { return t.trim(); }).filter(Boolean);
+    if (ready) topics = [ready.title || 'Ready-made episode'];
     stopping = false; $('kdRun').disabled = true;
 
     if (!topics.length) {
@@ -621,7 +629,7 @@
       var card = $('kdLog').firstElementChild, st = card.querySelector('.kd-st');
       try {
         st.textContent = 'Writing the episode…';
-        var story = cleanStory(await askClaude(key, KIDS_SYSTEM, STORY_SCHEMA, 'Episode topic: ' + topic));
+        var story = ready || cleanStory(await askClaude(key, KIDS_SYSTEM, STORY_SCHEMA, 'Episode topic: ' + topic));
         var mp3s = [];
         for (var k = 0; k < story.scenes.length; k++) {
           var line = story.scenes[k].narration;
@@ -646,7 +654,7 @@
           title = rv.title; description = rv.description;
         }
         var meta = {
-          snippet: { title: title.slice(0, 100), description: description, tags: (story.tags || []).slice(0, 15),
+          snippet: { title: (title || 'Little Pip').slice(0, 100), description: description || '', tags: (story.tags || []).slice(0, 15),
             categoryId: '27', defaultLanguage: 'en', defaultAudioLanguage: 'en' },
           status: { privacyStatus: 'private', selfDeclaredMadeForKids: true }
         };
@@ -660,6 +668,7 @@
           + esc(notes.join(' · '));
       } catch (e) { st.textContent = '❌ ' + e.message; }
     }
+    if (ready) $('kdScript').value = '';
     $('kdRun').disabled = false;
     toast(stopping ? 'Stopped' : 'All episodes finished');
     loadVideos(true);
