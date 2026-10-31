@@ -3,6 +3,9 @@
 // askClaude, uploadVideo, playGeneratedMusic, MOODS, KEY_STORE, loadVideos).
 (function () {
   var TTS_STORE = 'ytAgentTtsKey', EL_STORE = 'ytAgentElevenKey', EL_VOICE_STORE = 'ytAgentElevenVoice';
+  var FREE_VOICE_STORE = 'ytAgentFreeVoice', PITCH_STORE = 'ytAgentVoicePitch';
+  var KOKORO_URL = 'https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/+esm', KOKORO_MODEL = 'onnx-community/Kokoro-82M-v1.0-ONNX';
+  var kokoroLoading = null;
   var PLAYLIST_NAME = 'Learn with Pip';
   var BGS = ['sky', 'meadow', 'night', 'room', 'ocean'];
   var POSES = ['wave', 'happy', 'surprised', 'dance', 'sleepy'];
@@ -330,7 +333,11 @@
   async function renderKidsVideo(story, mp3s, onProgress, mood) {
     var W = 1280, H = 720;
     var ac = new AudioContext(); await ac.resume();
-    var bufs = await Promise.all(mp3s.map(function (b) { return b ? ac.decodeAudioData(b.slice(0)) : null; }));
+    var bufs = await Promise.all(mp3s.map(function (b) {
+      if (!b) return null;
+      if (b.pcm) { var buf = ac.createBuffer(1, b.pcm.length, b.rate); buf.copyToChannel(b.pcm, 0); return buf; }
+      return ac.decodeAudioData(b.slice(0));
+    }));
     var tm = sceneTimes(story, bufs), total = tm.total + 0.4;
     var canvas = document.createElement('canvas'); canvas.width = W; canvas.height = H;
     var ctx = canvas.getContext('2d');
@@ -439,6 +446,20 @@
     } catch (e) { toast('ElevenLabs: ' + e.message, true); }
   }
 
+  // ---------- Free voice: Kokoro (open-source, Apache-2.0) running in the browser ----------
+  function loadKokoro() {
+    if (!kokoroLoading) kokoroLoading = import(KOKORO_URL)
+      .then(function (m) { return m.KokoroTTS.from_pretrained(KOKORO_MODEL, { dtype: 'q8', device: 'wasm' }); })
+      .catch(function (e) { kokoroLoading = null; throw new Error('Free voice failed to load: ' + e.message); });
+    return kokoroLoading;
+  }
+  // Returns raw samples; pitch > 1 plays them faster and higher so Pip sounds younger.
+  async function speakFree(text, voice, pitch) {
+    var tts = await loadKokoro();
+    var audio = await tts.generate(text, { voice: voice });
+    return { pcm: audio.audio, rate: audio.sampling_rate * pitch };
+  }
+
   // ---------- YouTube extras ----------
   function srtTime(sec) {
     var ms = Math.round(sec * 1000), h = Math.floor(ms / 3600000), m = Math.floor(ms / 60000) % 60, s = Math.floor(ms / 1000) % 60;
@@ -498,6 +519,12 @@
       + '<div class="grid2">'
       + '<div><label for="kdClaude">Claude API key</label><input id="kdClaude" type="password" autocomplete="off" placeholder="sk-ant-…" style="width:100%;font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px"></div>'
       + '<div><label for="kdTts">Google voice API key (optional — empty = music + on-screen text)</label><input id="kdTts" type="password" autocomplete="off" placeholder="AIza…" style="width:100%;font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px"></div>'
+      + '<div><label for="kdFreeVoice">Free voice for Pip (no key; first use downloads about 90 MB)</label><select id="kdFreeVoice">'
+      + '<option value="af_heart">Heart (warm, US)</option><option value="af_bella">Bella (bright, US)</option>'
+      + '<option value="af_sky">Sky (light, US)</option><option value="bf_emma">Emma (gentle, UK)</option>'
+      + '<option value="none">No voice (music + on-screen text)</option></select></div>'
+      + '<div><label for="kdPitch">Pip voice style</label><select id="kdPitch">'
+      + '<option value="1">Normal</option><option value="1.12" selected>Younger</option><option value="1.22">Cartoon kid</option></select></div>'
       + '<div><label for="kdElKey">ElevenLabs API key (Pip\'s kid voice — used first if set)</label><input id="kdElKey" type="password" autocomplete="off" placeholder="sk_…" style="width:100%;font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px"></div>'
       + '<div><label for="kdElVoice">ElevenLabs voice for Pip</label><div style="display:flex;gap:6px"><select id="kdElVoice" style="flex:1"><option value="">(load your voices)</option></select>'
       + '<button type="button" class="secondary" id="kdElLoad">Load my voices</button></div></div>'
@@ -521,6 +548,9 @@
       var ek = localStorage.getItem(EL_STORE), ev = localStorage.getItem(EL_VOICE_STORE);
       if (ek) { $('kdElKey').value = ek; $('kdRemember').checked = true; }
       if (ev) $('kdElVoice').innerHTML = '<option value="' + esc(ev) + '">Saved voice</option>';
+      var fv = localStorage.getItem(FREE_VOICE_STORE), pv = localStorage.getItem(PITCH_STORE);
+      if (fv) $('kdFreeVoice').value = fv;
+      if (pv) $('kdPitch').value = pv;
     } catch (e) {}
     $('kdElLoad').onclick = loadElevenVoices;
 
@@ -557,6 +587,8 @@
   async function run() {
     var key = $('kdClaude').value.trim(), ttsKey = $('kdTts').value.trim(), voice = $('kdVoice').value;
     var elKey = $('kdElKey').value.trim(), elVoice = $('kdElVoice').value;
+    var freeVoice = $('kdFreeVoice').value, pitch = Number($('kdPitch').value) || 1;
+    try { localStorage.setItem(FREE_VOICE_STORE, freeVoice); localStorage.setItem(PITCH_STORE, String(pitch)); } catch (e) {}
     if (!key) return toast('Paste your Claude API key first', true);
     if (elKey && !elVoice) return toast('Click "Load my voices" and pick Pip\'s voice', true);
     try {
@@ -592,10 +624,17 @@
         var story = cleanStory(await askClaude(key, KIDS_SYSTEM, STORY_SCHEMA, 'Episode topic: ' + topic));
         var mp3s = [];
         for (var k = 0; k < story.scenes.length; k++) {
-          if (!elKey && !ttsKey) { mp3s.push(null); continue; }
+          var line = story.scenes[k].narration;
+          if (elKey) mp3s.push(await speakEleven(line, elKey, elVoice));
+          else if (ttsKey) mp3s.push(await speak(line, ttsKey, voice));
+          else if (freeVoice !== 'none') {
+            if (k === 0 && !kokoroLoading) st.textContent = 'Loading the free voice (first time can take a few minutes)…';
+            await loadKokoro();
+            st.textContent = 'Recording Pip\'s voice… ' + (k + 1) + '/' + story.scenes.length;
+            mp3s.push(await speakFree(line, freeVoice, pitch));
+            continue;
+          } else { mp3s.push(null); continue; }
           st.textContent = 'Recording Pip\'s voice… ' + (k + 1) + '/' + story.scenes.length;
-          mp3s.push(elKey ? await speakEleven(story.scenes[k].narration, elKey, elVoice)
-            : await speak(story.scenes[k].narration, ttsKey, voice));
         }
         var out = await renderKidsVideo(story, mp3s, function (p) { st.textContent = 'Animating… ' + p + '% (keep this tab on screen)'; }, i);
         var thumb = await drawThumbnail(story);
