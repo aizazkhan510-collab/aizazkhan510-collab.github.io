@@ -2,7 +2,7 @@
 // Loaded after manager.html's main script and uses its globals ($, esc, toast, token, channel, videos,
 // askClaude, uploadVideo, playGeneratedMusic, MOODS, KEY_STORE, loadVideos).
 (function () {
-  var TTS_STORE = 'ytAgentTtsKey';
+  var TTS_STORE = 'ytAgentTtsKey', EL_STORE = 'ytAgentElevenKey', EL_VOICE_STORE = 'ytAgentElevenVoice';
   var PLAYLIST_NAME = 'Learn with Pip';
   var BGS = ['sky', 'meadow', 'night', 'room', 'ocean'];
   var POSES = ['wave', 'happy', 'surprised', 'dance', 'sleepy'];
@@ -41,8 +41,9 @@
 
   var KIDS_SYSTEM = [
     'You write episodes of "Little Pip", an original animated learning show for children aged 2 to 5.',
-    'Pip is a small, round, sunny-yellow explorer with big eyes: curious, kind and gentle. Pip always learns together with the viewer and calls them "friends".',
-    'An episode is a list of scenes. Each scene has spoken narration (read aloud by a warm voice) and simple visuals drawn by code from a fixed vocabulary:',
+    'Pip is a small, round, sunny-yellow explorer with big eyes, about five years old: curious, kind, playful and gentle. Pip calls the viewers "friends" and learns together with them.',
+    'Pip tells the whole story in the first person, the way a cheerful child talks ("Hi friends! I\'m Pip! Ooh, look what I found!"): Pip describes what Pip sees and does, asks the viewers simple questions, leaves a moment for them to answer ("Can you say red? ... Red!") and cheers them on. There is no outside narrator.',
+    'An episode is a list of scenes. Each scene has narration (spoken aloud by Pip\'s voice) and simple visuals drawn by code from a fixed vocabulary:',
     '- background: sky, meadow, night, room or ocean.',
     '- pip (Pip\'s pose): wave, happy, surprised, dance or sleepy.',
     '- items: objects shown next to Pip, each with a shape, a hex colour matching the colour named in the narration, and a count (1-10). Show at most 2 item groups and 10 objects in total per scene. Items pop in one by one, so counting scenes should show exactly the number being counted. For "rainbow", count is how many colour bands are filled in (1-6; the rest are grey), so a rainbow can fill up over several scenes.',
@@ -407,6 +408,37 @@
     return bytes.buffer;
   }
 
+  // ---------- ElevenLabs (Pip's character voice) ----------
+  async function speakEleven(text, key, voiceId) {
+    var res = await fetch('https://api.elevenlabs.io/v1/text-to-speech/' + encodeURIComponent(voiceId) + '?output_format=mp3_44100_128', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'xi-api-key': key, Accept: 'audio/mpeg' },
+      body: JSON.stringify({ text: text, model_id: 'eleven_multilingual_v2',
+        voice_settings: { stability: 0.45, similarity_boost: 0.8, style: 0.35, use_speaker_boost: true } })
+    });
+    if (!res.ok) {
+      var d = (await res.json().catch(function () { return {}; })).detail;
+      throw new Error('ElevenLabs: ' + ((d && (d.message || d.status)) || (typeof d === 'string' ? d : '') || res.statusText));
+    }
+    return res.arrayBuffer();
+  }
+  async function loadElevenVoices() {
+    var key = $('kdElKey').value.trim();
+    if (!key) return toast('Paste your ElevenLabs API key first', true);
+    try {
+      var res = await fetch('https://api.elevenlabs.io/v1/voices', { headers: { 'xi-api-key': key } });
+      var data = await res.json().catch(function () { return {}; });
+      if (!res.ok) throw new Error((data.detail && data.detail.message) || res.statusText);
+      var list = data.voices || [];
+      if (!list.length) throw new Error('no voices in your account yet — add one from the Voice Library');
+      $('kdElVoice').innerHTML = list.map(function (v) {
+        var l = v.labels || {};
+        return '<option value="' + esc(v.voice_id) + '">' + esc(v.name + (l.age ? ' · ' + l.age : '') + (l.gender ? ' · ' + l.gender : '')) + '</option>';
+      }).join('');
+      toast('Loaded ' + list.length + ' voices — pick Pip\'s voice');
+    } catch (e) { toast('ElevenLabs: ' + e.message, true); }
+  }
+
   // ---------- YouTube extras ----------
   function srtTime(sec) {
     var ms = Math.round(sec * 1000), h = Math.floor(ms / 3600000), m = Math.floor(ms / 60000) % 60, s = Math.floor(ms / 1000) % 60;
@@ -466,7 +498,10 @@
       + '<div class="grid2">'
       + '<div><label for="kdClaude">Claude API key</label><input id="kdClaude" type="password" autocomplete="off" placeholder="sk-ant-…" style="width:100%;font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px"></div>'
       + '<div><label for="kdTts">Google voice API key (optional — empty = music + on-screen text)</label><input id="kdTts" type="password" autocomplete="off" placeholder="AIza…" style="width:100%;font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px"></div>'
-      + '<div><label for="kdVoice">Narrator voice</label><select id="kdVoice">'
+      + '<div><label for="kdElKey">ElevenLabs API key (Pip\'s kid voice — used first if set)</label><input id="kdElKey" type="password" autocomplete="off" placeholder="sk_…" style="width:100%;font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px"></div>'
+      + '<div><label for="kdElVoice">ElevenLabs voice for Pip</label><div style="display:flex;gap:6px"><select id="kdElVoice" style="flex:1"><option value="">(load your voices)</option></select>'
+      + '<button type="button" class="secondary" id="kdElLoad">Load my voices</button></div></div>'
+      + '<div><label for="kdVoice">Google voice (if no ElevenLabs key)</label><select id="kdVoice">'
       + '<option value="en-US-Neural2-F">Warm female (US)</option><option value="en-US-Neural2-H">Bright female (US)</option>'
       + '<option value="en-US-Neural2-D">Friendly male (US)</option><option value="en-GB-Neural2-A">Gentle female (UK)</option></select></div>'
       + '<div><label for="kdCount">If the list is empty, AI picks this many episodes</label><input id="kdCount" type="number" min="1" max="10" value="3"></div>'
@@ -483,7 +518,11 @@
       var ck = localStorage.getItem(KEY_STORE), tk = localStorage.getItem(TTS_STORE);
       if (ck) $('kdClaude').value = ck;
       if (tk) { $('kdTts').value = tk; $('kdRemember').checked = true; }
+      var ek = localStorage.getItem(EL_STORE), ev = localStorage.getItem(EL_VOICE_STORE);
+      if (ek) { $('kdElKey').value = ek; $('kdRemember').checked = true; }
+      if (ev) $('kdElVoice').innerHTML = '<option value="' + esc(ev) + '">Saved voice</option>';
     } catch (e) {}
+    $('kdElLoad').onclick = loadElevenVoices;
 
     btn.onclick = function () {
       document.querySelectorAll('nav button').forEach(function (x) { x.classList.toggle('active', x === btn); });
@@ -517,10 +556,14 @@
 
   async function run() {
     var key = $('kdClaude').value.trim(), ttsKey = $('kdTts').value.trim(), voice = $('kdVoice').value;
+    var elKey = $('kdElKey').value.trim(), elVoice = $('kdElVoice').value;
     if (!key) return toast('Paste your Claude API key first', true);
+    if (elKey && !elVoice) return toast('Click "Load my voices" and pick Pip\'s voice', true);
     try {
-      if ($('kdRemember').checked) { localStorage.setItem(KEY_STORE, key); localStorage.setItem(TTS_STORE, ttsKey); }
-      else localStorage.removeItem(TTS_STORE);
+      if ($('kdRemember').checked) {
+        localStorage.setItem(KEY_STORE, key); localStorage.setItem(TTS_STORE, ttsKey);
+        localStorage.setItem(EL_STORE, elKey); localStorage.setItem(EL_VOICE_STORE, elVoice);
+      } else [TTS_STORE, EL_STORE, EL_VOICE_STORE].forEach(function (k) { localStorage.removeItem(k); });
     } catch (e) {}
     var topics = $('kdTopics').value.split('\n').map(function (t) { return t.trim(); }).filter(Boolean);
     stopping = false; $('kdRun').disabled = true;
@@ -549,9 +592,10 @@
         var story = cleanStory(await askClaude(key, KIDS_SYSTEM, STORY_SCHEMA, 'Episode topic: ' + topic));
         var mp3s = [];
         for (var k = 0; k < story.scenes.length; k++) {
-          if (!ttsKey) { mp3s.push(null); continue; }
+          if (!elKey && !ttsKey) { mp3s.push(null); continue; }
           st.textContent = 'Recording Pip\'s voice… ' + (k + 1) + '/' + story.scenes.length;
-          mp3s.push(await speak(story.scenes[k].narration, ttsKey, voice));
+          mp3s.push(elKey ? await speakEleven(story.scenes[k].narration, elKey, elVoice)
+            : await speak(story.scenes[k].narration, ttsKey, voice));
         }
         var out = await renderKidsVideo(story, mp3s, function (p) { st.textContent = 'Animating… ' + p + '% (keep this tab on screen)'; }, i);
         var thumb = await drawThumbnail(story);
