@@ -3,26 +3,36 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Aizaz Khan</title>
+  <title>Little Pip Studio</title>
   <style>
     :root { --bg: #0f172a; --fg: #e2e8f0; --muted: #94a3b8; --accent: #38bdf8; }
     * { box-sizing: border-box; }
     body { margin: 0; min-height: 100vh; display: grid; place-items: center;
            background: var(--bg); color: var(--fg);
            font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-    main { max-width: 640px; padding: 32px 16px; text-align: center; }
+    main { max-width: 680px; padding: 32px 16px; text-align: center; }
     h1 { font-size: clamp(2rem, 6vw, 3rem); margin: 0 0 12px; }
     p { color: var(--muted); line-height: 1.6; margin: 0 0 24px; }
-    a { color: var(--accent); text-decoration: none; border: 1px solid var(--accent);
-        padding: 10px 18px; border-radius: 8px; display: inline-block; }
-    a:hover { background: var(--accent); color: var(--bg); }
+    a.btn { color: var(--accent); text-decoration: none; border: 1px solid var(--accent);
+        padding: 10px 18px; border-radius: 8px; display: inline-block; margin: 4px; }
+    a.btn:hover { background: var(--accent); color: var(--bg); }
+    footer { margin-top: 36px; font-size: .9rem; color: var(--muted); line-height: 1.7; }
+    footer a { color: var(--accent); }
   </style>
 </head>
 <body>
   <main>
-    <h1>Hi, I'm Aizaz Khan</h1>
-    <p>Welcome to my website. More coming soon.</p>
-    <a href="https://github.com/aizazkhan510-collab">View my GitHub</a>
+    <h1>Little Pip Studio</h1>
+    <p>A private tool by Aizaz Khan for making and managing the "Little Pip" YouTube channel:
+      original animated learning videos for children aged 2–5.</p>
+    <a class="btn" href="manager.html">Open Little Pip Studio</a>
+    <a class="btn" href="https://github.com/aizazkhan510-collab">GitHub</a>
+    <footer>
+      <a href="privacy.html">Privacy Policy</a> · <a href="terms.html">Terms of Service</a><br>
+      This app uses YouTube API Services. By using it you agree to the
+      <a href="https://www.youtube.com/t/terms">YouTube Terms of Service</a> and the
+      <a href="https://policies.google.com/privacy">Google Privacy Policy</a>.
+    </footer>
   </main>
 </body>
 </html>
