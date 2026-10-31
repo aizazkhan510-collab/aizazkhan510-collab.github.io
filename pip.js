@@ -286,7 +286,7 @@
       var x = areaX + areaW / 2 + (col - (rowN - 1) / 2) * s * 2.7;
       var y = cy + (row - (rows - 1) / 2) * s * 2.9 + Math.sin(t * 2 + k) * 4;
       ctx.save(); ctx.translate(x, y); ctx.scale(sc, sc);
-      if (it.shape === 'rainbow') drawShape(ctx, 'rainbow', 0, 0, H * 0.24, it.color, t, Math.max(0, Math.min(6, it.count || 6)));
+      if (it.shape === 'rainbow') drawShape(ctx, 'rainbow', 0, 0, H * 0.24, it.color, t, Math.max(0, Math.min(6, it.count == null ? 6 : it.count)));
       else drawShape(ctx, it.shape, 0, 0, s, it.color || '#e63946', t, 0);
       ctx.restore();
     });
